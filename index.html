@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Claude Bridge</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f1a;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#connect{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:30px}
+#connect h1{font-size:28px;color:#fff;margin-bottom:6px}
+#connect p{color:#777;margin-bottom:30px;font-size:14px}
+#deviceId{width:100%;max-width:320px;background:#1a1a2e;border:1px solid #0f3460;border-radius:12px;padding:14px;color:#fff;font-size:16px;outline:none;margin-bottom:20px}
+#deviceId::placeholder{color:#444}
+#connectBtn{background:#e94560;border:none;border-radius:12px;padding:14px 50px;color:#fff;font-size:17px;font-weight:600;cursor:pointer}
+#connectBtn:disabled{opacity:.5}
+#hint{color:#444;font-size:12px;margin-top:15px;text-align:center}
+#header{display:none;flex-direction:row;align-items:center;justify-content:center;padding:12px;border-bottom:1px solid #1a1a2e}
+#header span{font-size:16px;font-weight:600;color:#fff}
+#statusDot{width:8px;height:8px;border-radius:50%;background:#4ecca3;margin-left:8px}
+#chat{display:none;flex-direction:column;flex:1;overflow:hidden}
+#messages{flex:1;overflow-y:auto;padding:12px;-webkit-overflow-scrolling:touch}
+.msg{margin-bottom:10px;max-width:85%;animation:fadeIn .2s}
+.msg.bot{align-self:flex-start}
+.msg.self{align-self:flex-end;margin-left:auto}
+.msg .bubble{border-radius:14px;padding:10px 14px;font-size:15px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.msg.bot .bubble{background:#1a1a2e;color:#d0d0d0}
+.msg.self .bubble{background:#0f3460;color:#fff}
+.cursor{color:#e94560;animation:blink 1s infinite}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+#inputRow{display:none;flex-direction:row;padding:10px;border-top:1px solid #1a1a2e;align-items:flex-end}
+#input{flex:1;background:#1a1a2e;border:none;border-radius:20px;padding:10px 16px;color:#fff;font-size:15px;outline:none;max-height:100px;resize:none}
+#input::placeholder{color:#444}
+#sendBtn{background:#e94560;border:none;border-radius:20px;padding:10px 22px;color:#fff;font-size:15px;font-weight:600;margin-left:8px;cursor:pointer;white-space:nowrap}
+#sendBtn:disabled{opacity:.5}
+#status{display:none;text-align:center;padding:6px;font-size:11px;background:#16213e;color:#888}
+</style>
+</head>
+<body>
+<div id="connect"><h1>🤖 Claude Bridge</h1><p>MQTT 远程控制你的 PC</p><input id="deviceId" placeholder="设备ID (例如 pc-abbc847d3517)" autocomplete="off" autocapitalize="none"><button id="connectBtn" onclick="doConnect()">连接</button><p id="hint">设备ID显示在 PC 端桥接启动日志中</p></div>
+<div id="status">🟢 已连接</div>
+<div id="header"><span>Claude Bridge</span><div id="statusDot"></div></div>
+<div id="chat"><div id="messages"></div><div id="inputRow"><textarea id="input" rows="1" placeholder="输入消息..." onkeydown="onKeyDown(event)"></textarea><button id="sendBtn" onclick="doSend()">发送</button></div></div>
+<script>
+class MiniMqtt{constructor(e){this.url=e;this.ws=null;this.connected=false;this.onMessage=null;this.onStatus=null;this.packetId=1;this.pingTimer=null}connect(e){return new Promise((t,n)=>{try{this.ws=new WebSocket(this.url,'mqtt')}catch(e){n(e);return}const s=setTimeout(()=>{if(!this.connected){try{this.ws.close()}catch(e){}n(new Error('连接超时'))}},15000);this.ws.binaryType='arraybuffer';this.ws.onopen=()=>{const e=this._buildConnect(e);this.ws.send(new Uint8Array(e).buffer);this._startPing()};this.ws.onmessage=i=>{const o=new Uint8Array(i.data),r=o[0]>>4;if(2===r){clearTimeout(s);this.connected=true;this.onStatus?.('connected');t()}else if(3===r)this._handlePublish(o)};this.ws.onclose=()=>{this.connected=false;this._stopPing();this.onStatus?.('disconnected');setTimeout(()=>{if(this.ws&&this.ws.readyState===WebSocket.CLOSED)this.connect(e).catch(()=>{})},3000)};this.ws.onerror=e=>{clearTimeout(s);n(e)}})}subscribe(e){const t=this._buildSubscribe(e);this.ws?.send(new Uint8Array(t).buffer)}publish(e,t,n=1){const s=this.packetId++,i='string'==typeof t?t:JSON.stringify(t),o=this._buildPublish(e,i,s,n);this.ws?.send(new Uint8Array(o).buffer)}disconnect(){this._stopPing();this.ws?.close();this.connected=false}_handlePublish(e){let t=1;for(;e[t]&128;)t++;t++;const n=(e[t]<<8)|e[t+1];t+=2;const s=new TextDecoder().decode(e.slice(t,t+n));t+=n;const i=(e[0]>>1)&3;i>0&&(t+=2);const o=new TextDecoder().decode(e.slice(t));if(1===i){const e=(e[t-2]<<8)|e[t-1];this.ws?.send(new Uint8Array([64,2,e>>8&255,255&e]).buffer)}this.onMessage?.(s,o)}_buildConnect(e){const t=e||'web-'+Math.random().toString(36).substring(2,10),n='MQTT',s=[0,n.length,...Array.from(n).map(e=>e.charCodeAt(0)),4,2,0,60],i=[0,t.length,...Array.from(t).map(e=>e.charCodeAt(0))],o=[...s,...i];return[16,...this._encodeLen(o.length),...o]}_buildSubscribe(e){const t=this.packetId++,n=[t>>8&255,255&t,0,e.length,...Array.from(e).map(e=>e.charCodeAt(0)),1];return[130,...this._encodeLen(n.length),...n]}_buildPublish(e,t,n,s){const i=s<<1,o=new TextEncoder().encode(t),r=Array.from(e).map(e=>e.charCodeAt(0)),a=[0,e.length,...r,n>>8&255,255&n,...o];return[48|i,...this._encodeLen(a.length),...a]}_encodeLen(e){const t=[];do{let n=127&e;e>>=7;e>0&&(n|=128);t.push(n)}while(e>0);return t}_startPing(){this._stopPing();this.pingTimer=setInterval(()=>{this.ws?.readyState===WebSocket.OPEN&&this.ws.send(new Uint8Array([192,0]).buffer)},5e4)}_stopPing(){this.pingTimer&&(clearInterval(this.pingTimer),this.pingTimer=null)}}
+const BROKER='broker-cn.emqx.io',PORT=8084,PREFIX='claude-bridge';let mqtt=null,deviceId='',activeMsgEl=null,connected=false;
+async function doConnect(){deviceId=document.getElementById('deviceId').value.trim();if(!deviceId)return alert('请输入设备ID');const e=document.getElementById('connectBtn');e.disabled=true;e.textContent='连接中...';mqtt=new MiniMqtt(`wss://${BROKER}:${PORT}/mqtt`);mqtt.onStatus=e=>{'connected'===e?(connected=true,document.getElementById('connect').style.display='none',document.getElementById('chat').style.display='flex',document.getElementById('header').style.display='flex',document.getElementById('inputRow').style.display='flex',document.getElementById('status').style.display='block',addMsg('bot','✅ 已连接到 PC 桥接\n发送消息即可与 Claude Code 对话')):'disconnected'===e&&(connected=false,document.getElementById('status').textContent='🔴 已断开，自动重连中...',document.getElementById('statusDot').style.background='#e94560')};mqtt.onMessage=(e,t)=>{try{const e=JSON.parse(t);'result'===e.type&&updateMsg(e.text,!e.done)}catch(e){}};try{await mqtt.connect('web-'+Math.random().toString(36).substring(2,8)),mqtt.subscribe(`${PREFIX}/${deviceId}/res`),mqtt.subscribe(`${PREFIX}/${deviceId}/status`)}catch(t){e.disabled=false,e.textContent='连接',alert('连接失败: '+(t.message||'无法连接到 Broker'))}}
+let msgId=0;
+function addMsg(e,t){const n=document.createElement('div');n.className='msg '+e;n.id='m'+(++msgId);n.innerHTML=`<div class="bubble">${escapeHtml(t)}</div>`;document.getElementById('messages').appendChild(n);scrollDown();return n}
+function updateMsg(e,t){if(activeMsgEl&&t)activeMsgEl.querySelector('.bubble').innerHTML=escapeHtml(e)+'<span class="cursor">▌</span>';else{activeMsgEl&&(activeMsgEl.querySelector('.bubble').innerHTML=escapeHtml(e));activeMsgEl=addMsg('bot',e);t&&(activeMsgEl.querySelector('.bubble').innerHTML+='<span class="cursor">▌</span>')}scrollDown()}
+function scrollDown(){const e=document.getElementById('messages');setTimeout(()=>{e.scrollTop=e.scrollHeight},50)}
+function escapeHtml(e){return e.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function doSend(){const e=document.getElementById('input'),t=e.value.trim();if(!t||!connected)return;e.value='';addMsg('self',t);activeMsgEl=null;mqtt.publish(`${PREFIX}/${deviceId}/cmd`,t)}
+function onKeyDown(e){'Enter'===e.key&&!e.shiftKey&&(e.preventDefault(),doSend())}
+document.getElementById('input').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'});
+</script>
+</body>
+</html>
